@@ -735,12 +735,30 @@ def check_rsync_errors(
         log_error(
             f"Rsync reported an error. Run this command for more details: grep -E 'rsync:|rsync error:' '{log_file}'",
         )
+        send_notification(
+            title="Backup Error",
+            message="Message",
+            tags="x",
+            priority="urgent",
+        )
     elif "rsync:" in log_data:
         log_warn(
             f"Rsync reported a warning. Run this command for more details: grep -E 'rsync:|rsync error:' '{log_file}'",
         )
+        send_notification(
+            title="Backup Warning",
+            message="Message",
+            tags="warning",
+            priority="urgent",
+        )
     else:
         log_info(style("Backup completed without errors.", "magenta"))
+        send_notification(
+            title="Backup Success",
+            message="Message",
+            tags="white_check_mark",
+            priority="default",
+        )
         if auto_delete_log:
             os.remove(log_file)
 
@@ -905,6 +923,7 @@ def backup(
             ssh,
             now,
         )
+
         retry = deal_with_no_space_left(
             log_file,
             dest_folder,
