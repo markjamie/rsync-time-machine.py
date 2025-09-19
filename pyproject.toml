@@ -7,7 +7,7 @@ name = "rsync-time-machine"
 description = "rsync-time-machine.py is a wrapper around rsync to make it easier to create and maintain Time Machine style backups."
 dynamic = ["version"]
 authors = [{ name = "Bas Nijholt", email = "bas@nijho.lt" }]
-dependencies = []
+dependencies = ["requests"]
 requires-python = ">=3.7"
 
 [project.readme]
@@ -18,7 +18,7 @@ content-type = "text/markdown"
 Homepage = "https://github.com/basnijholt/rsync-time-machine.py"
 
 [project.optional-dependencies]
-test = ["pytest", "pre-commit", "coverage", "pytest-cov"]
+test = ["pytest", "pre-commit", "coverage", "pytest-cov", "types-requests"]
 docs = []
 
 [project.scripts]
@@ -27,9 +27,8 @@ rsync-time-machine = "rsync_time_machine:main"
 [tool.setuptools]
 py-modules = ["rsync_time_machine"]
 
-[tool.pytest.ini_options]
-minversion = "7.0"
-testpaths = ["tests"]
+[tool.setuptools.packages.find]
+include = ["rsync_time_machine*"]
 
 [tool.coverage.report]
 exclude_lines = [
