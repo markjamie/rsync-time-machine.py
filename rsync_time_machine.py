@@ -13,6 +13,8 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, NamedTuple
 
+import requests
+
 if TYPE_CHECKING:
     from types import FrameType
 
@@ -112,7 +114,7 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
     parser.add_argument(
         "--rsync-get-flags",
         action="store_true",
-        help="Display the default rsync flags that are used for backup. If using remote drive over SSH, --compress will be added.",
+        help="Display the default rsync flags that are used for backup. If using remote drive over SSH, --compress will be added.",  # noqa: E501
     )
     parser.add_argument(
         "--rsync-set-flags",
@@ -136,7 +138,7 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
     parser.add_argument(
         "--no-auto-expire",
         action="store_true",
-        help="Disable automatically deleting backups when out of space. Instead, an error is logged, and the backup is aborted.",
+        help="Disable automatically deleting backups when out of space. Instead, an error is logged, and the backup is aborted.",  # noqa: E501
     )
     parser.add_argument(
         "--allow-host-only",
@@ -505,7 +507,7 @@ def check_dest_is_backup_folder(
     if not find_backup_marker(dest_folder, ssh):
         log_info(
             style(
-                "Safety check failed - the destination does not appear to be a backup folder or drive (marker file not found).",
+                "Safety check failed - the destination does not appear to be a backup folder or drive (marker file not found).",  # noqa: E501
                 "yellow",
             ),
         )
@@ -930,6 +932,48 @@ def backup(
     )
 
     rm_file(inprogress_file, ssh)
+
+
+def send_notification(
+    title: str,
+    message: str,
+    tags: str = "",
+    priority: str = "urgent",
+) -> bool:
+    """Send a push notification via HTTP with retry logic."""
+    retry_count = 3
+    timeout = 10
+    endpoint = "https://ntfy.sh/markjamie-nas2nas-backup"
+
+    for attempt in range(retry_count):
+        try:
+            headers = {"Priority": priority, "Title": title}
+            if tags:
+                headers["Tags"] = tags
+            response = requests.post(
+                endpoint,
+                data=message,
+                headers=headers,
+                timeout=timeout,
+            )
+            if response.status_code == 200:  # noqa: PLR2004
+                return True
+
+            # Log non-200 responses but continue retrying
+            log_warn(
+                f"Notification attempt {attempt + 1} got status {response.status_code}",
+            )
+
+        except requests.RequestException as e:
+            log_warn(f"Notification attempt {attempt + 1} failed: {e}")
+
+        # Wait before retry with exponential backoff
+        if attempt < retry_count - 1:
+            time.sleep(2**attempt)
+
+    log_error(f"Failed to send notification after {retry_count} attempts")
+
+    return False
 
 
 def main() -> None:
