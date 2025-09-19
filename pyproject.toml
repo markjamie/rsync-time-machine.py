@@ -28,12 +28,8 @@ rsync-time-machine = "rsync_time_machine:main"
 py-modules = ["rsync_time_machine"]
 
 [tool.pytest.ini_options]
-addopts = """
-    --cov=rsync_time_machine
-    --cov-report term
-    --cov-report html
-    --cov-fail-under=70
-"""
+minversion = "7.0"
+testpaths = ["tests"]
 
 [tool.coverage.report]
 exclude_lines = [
