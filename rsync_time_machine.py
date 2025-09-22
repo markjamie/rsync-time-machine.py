@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import signal
 import sys
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable, NamedTuple
+from logging.handlers import RotatingFileHandler
+from typing import TYPE_CHECKING, Callable, ClassVar, NamedTuple
 
 import requests
 
@@ -39,54 +41,115 @@ def dest_is_ssh(ssh: SSH | None) -> SSH | None:
     return ssh if ssh and ssh.dest_folder_prefix else None
 
 
-COLORS = {
-    "green": "\033[92m",
-    "magenta": "\033[95m",
-    "yellow": "\033[93m",
-    "red": "\033[91m",
-    "orange": "\033[33m",
-}
+# ANSI color codes
+RESET = "\033[0m"
+BOLD = "\033[1m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
+WHITE = "\033[37m"
+
+
+class ColourFormatter(logging.Formatter):
+    """Logging formatter - with color."""
+
+    LEVEL_COLOURS: ClassVar[dict[int, str]] = {
+        logging.DEBUG: CYAN,
+        logging.INFO: WHITE,
+        logging.WARNING: YELLOW,
+        logging.ERROR: RED,
+        logging.CRITICAL: MAGENTA,
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Overloaded text formatter."""
+        colour = self.LEVEL_COLOURS.get(record.levelno, "")
+        dt = self.formatTime(record, self.datefmt)
+        msg = record.getMessage()
+        return f"{colour}    {dt}    {record.levelname}    {msg}{RESET}"
+
+
+class PlainFormatter(logging.Formatter):
+    """Logging formatter - no color."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Overloaded text formatter."""
+        dt = self.formatTime(record, self.datefmt)
+        msg = record.getMessage()
+        return f"{dt}    {record.levelname}    {msg}{RESET}"
+
+
+# Logger setup
+logger = logging.getLogger("rsync-time-machine")
+logger.setLevel(logging.DEBUG)
+
+# Console handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# File handler (size-based, numbered)
+file_handler = RotatingFileHandler(
+    "rsync-time-machine.log",
+    maxBytes=5 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
 
 
 def style(text: str, color: str | None = None, *, bold: bool = False) -> str:
     """Return styled text."""
-    color_code = COLORS.get(color, "")  # type: ignore[arg-type]
-    bold_code = "\033[1m" if bold else ""
-    reset_code = "\033[0m"
-    return f"{bold_code}{color_code}{text}{reset_code}"
+    colors = {
+        "green": GREEN,
+        "yellow": YELLOW,
+        "red": RED,
+        "magenta": MAGENTA,
+        "cyan": CYAN,
+    }
+    color_code = colors.get(color or "", "")
+    bold_code = BOLD if bold else ""
+    return f"{bold_code}{color_code}{text}{RESET}"
 
 
 def sanitize(s: str) -> str:
     """Return a sanitized version of the string."""
-    # See https://github.com/basnijholt/rsync-time-machine.py/issues/1
     return s.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
-def log(message: str, level: str = "info") -> None:
-    """Log a message with the specified log level."""
-    levels = {"info": "", "warning": "[WARNING] ", "error": "[ERROR] "}
-    output = sys.stderr if level in {"warning", "error"} else sys.stdout
-    message = sanitize(message)
-    print(f"{style(APPNAME, bold=True)}: {levels[level]}{message}", file=output)
-
-
 def log_info(message: str) -> None:
-    """Log an info message to stdout."""
-    log(message, "info")
+    """Return a logger INFO message."""
+    logger.info(sanitize(message))
 
 
 def log_warn(message: str) -> None:
-    """Log a warning message to stderr."""
-    log(style(message, "orange"), "warning")
+    """Return a logger WARNING message."""
+    logger.warning(sanitize(message))
 
 
 def log_error(message: str) -> None:
-    """Log an error message to stderr."""
-    log(style(message, "red", bold=True), "error")
+    """Return a logger ERROR message."""
+    logger.error(sanitize(message))
+
+
+def log_debug(message: str) -> None:
+    """Return a logger DEBUG message."""
+    logger.debug(sanitize(message))
+
+
+def log_crtical(message: str) -> None:
+    """Return a logger CRITICAL message."""
+    logger.critical(sanitize(message))
 
 
 def log_info_cmd(message: str, ssh: SSH | None = None) -> None:
-    """Log an info message to stdout, including the SSH command if applicable."""
+    """Return a logger INFO message wiht a command."""
     if ssh is not None:
         message = f"{ssh.cmd} '{message}'"
     log_info(message)
