@@ -52,6 +52,8 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 WHITE = "\033[37m"
 
+ANSI_ESCAPE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
 
 class ColourFormatter(logging.Formatter):
     """Logging formatter - with color."""
@@ -78,8 +80,8 @@ class PlainFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Overloaded text formatter."""
         dt = self.formatTime(record, self.datefmt)
-        msg = record.getMessage()
-        return f"{dt}    {record.levelname}    {msg}{RESET}"
+        msg = ANSI_ESCAPE.sub("", record.getMessage())
+        return f"{dt}    {record.levelname}    {msg}"
 
 
 # Logger setup
@@ -920,6 +922,8 @@ def backup(
     previous_dest = _backups[0] if _backups else None
     inprogress_file = os.path.join(dest_folder, "backup.inprogress")
     mypid = os.getpid()
+
+    log_info(50 * "=")
 
     if not os.path.exists(log_dir):
         log_info(f"Creating log folder in '{log_dir}'...")
