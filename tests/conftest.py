@@ -1,4 +1,11 @@
 # tests/conftest.py
+
+"""Special test configuration file.
+
+Used to share fixtures, hooks, and configuration
+across multiple test files.
+"""
+
 import builtins
 
 import pytest
@@ -7,7 +14,7 @@ import rsync_time_machine
 
 
 @pytest.fixture(autouse=True)
-def printify_logs(monkeypatch) -> None:
+def printify_logs(monkeypatch) -> None:  # noqa: ANN001
     """Replace module-level logging helper functions with print() during tests.
 
     This makes assertions that use capsys (or simple text capture) reliable, without
