@@ -13,11 +13,12 @@ import sys
 import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from typing import TYPE_CHECKING, Callable, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import requests
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType
 
 APPNAME = "rsync-time-machine.py"
@@ -210,8 +211,10 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
         action="store_true",
         help="By default, the script expects a 'USER@HOST' pattern for specifying SSH connections."
         " When this flag is used, it allows for the 'HOST' pattern without a specified user."
-        " This is useful if you want to use configurations from the `.ssh/config` file or rely on the current username."
-        " Note: this option will not enforce SSH usage, it only broadens the accepted input formats.",
+        " This is useful if you want to use configurations from the `.ssh/config` file or rely"
+        " on the current username."
+        " Note: this option will not enforce SSH usage, it only broadens the accepted input"
+        " formats.",
     )
     parser.add_argument(
         "--dry-run",
@@ -244,7 +247,8 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
         "-v",
         "--verbose",
         action="store_true",
-        help="Enable verbose output. This will slow down the backup process (in simple tests by 2x).",
+        help="Enable verbose output. This will slow down the backup process "
+             "(in simple tests by 2x).",
     )
     args = parser.parse_args()
     # If both positional exclusion_file and optional --exclude-from are provided, raise an error
@@ -393,10 +397,12 @@ def expire_backups(
         for strategy_token in sorted(expiration_strategy.split(), reverse=True):
             t = list(map(int, strategy_token.split(":")))
 
-            # After which date (relative to today) this token applies (X) - we use seconds to get exact cut off time
+            # After which date (relative to today) this token applies (X)
+            # We use seconds to get exact cut off time
             cut_off_timestamp = current_timestamp - t[0] * 86400
 
-            # Every how many days should a backup be kept past the cut off date (Y) - we use days (not seconds)
+            # Every how many days should a backup be kept past the cut off date (Y)
+            # We use days (not seconds)
             cut_off_interval_days = t[1]
 
             # If we've found the strategy token that applies to this backup
@@ -419,7 +425,8 @@ def expire_backups(
                 if interval_since_last_kept_days < cut_off_interval_days:
                     # Yes: Delete that one
                     expire_backup(backup_dir, ssh)
-                    # Backup deleted, no point to check shorter timespan strategies - go to the next backup
+                    # Backup deleted, no point to check shorter timespan strategies
+                    # go to next backup
                     break
 
                 # No: Keep it.
@@ -456,7 +463,8 @@ async def async_run_cmd(
     """Run a command locally or remotely."""
     if VERBOSE:
         log_info(
-            f"Running {'local' if ssh is None else 'remote'} command: {style(cmd, 'green', bold=True)}",
+            f"Running {'local' if ssh is None else 'remote'}"
+            f" command: {style(cmd, 'green', bold=True)}",
         )
 
     if ssh is not None:
@@ -572,13 +580,15 @@ def check_dest_is_backup_folder(
     if not find_backup_marker(dest_folder, ssh):
         log_info(
             style(
-                "Safety check failed - the destination does not appear to be a backup folder or drive (marker file not found).",  # noqa: E501
+                "Safety check failed - the destination does not appear to be a backup folder "
+                "or drive (marker file not found).",
                 "yellow",
             ),
         )
         log_info(
             style(
-                "If it is indeed a backup folder, you may add the marker file by running the following command:",
+                "If it is indeed a backup folder, you may add the marker file by running "
+                "the following command:",
                 "yellow",
             ),
         )
@@ -608,7 +618,8 @@ def get_link_dest_option(
         )
         log_info(
             style(
-                f"Previous backup found - doing incremental backup from {style(_full_previous_dest, bold=True)}",
+                "Previous backup found - doing incremental backup"
+                f" from {style(_full_previous_dest, bold=True)}",
                 "yellow",
             ),
         )
@@ -743,7 +754,8 @@ def handle_still_running_or_failed_or_interrupted_backup(
         # - 2nd to last backup becomes last backup.
         ssh_dest_folder_prefix = ssh.dest_folder_prefix if ssh else ""
         log_info(
-            f"{ssh_dest_folder_prefix}{inprogress_file} already exists - the previous backup failed or was interrupted. Backup will resume from there.",  # noqa: E501
+                f"{ssh_dest_folder_prefix}{inprogress_file} already exists - the previous backup"
+                "failed or was interrupted. Backup will resume from there.",
         )
         run_cmd(f"mv -- {previous_dest} {dest}", ssh)
         backups = find_backups(dest_folder, ssh)
@@ -798,7 +810,8 @@ def check_rsync_errors(
         log_data = f.read()
     if "rsync error:" in log_data:
         log_error(
-            f"Rsync reported an error. Run this command for more details: grep -E 'rsync:|rsync error:' '{log_file}'",
+                "Rsync reported an error. Run this command for more details: "
+                "grep -E 'rsync:|rsync error:' '{log_file}'",
         )
         send_notification(
             title="Backup Error",
@@ -808,7 +821,8 @@ def check_rsync_errors(
         )
     elif "rsync:" in log_data:
         log_warn(
-            f"Rsync reported a warning. Run this command for more details: grep -E 'rsync:|rsync error:' '{log_file}'",
+            "Rsync reported a warning. Run this command for more details: "
+            f"grep -E 'rsync:|rsync error:' '{log_file}'",
         )
         send_notification(
             title="Backup Warning",
@@ -860,7 +874,8 @@ def start_backup(
     cmd = "rsync"
     if ssh is not None:
         id_rsa_option = f"-i {ssh.id_rsa} " if ssh.id_rsa else ""
-        cmd = f"{cmd} -e 'ssh -p {ssh.port} {id_rsa_option}-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'"
+        cmd = f"{cmd} -e 'ssh -p {ssh.port} {id_rsa_option}-o "
+        "StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'"
 
     cmd = f"{cmd} {' '.join(rsync_flags)}"
     cmd = f"{cmd} --log-file '{log_file}'"
