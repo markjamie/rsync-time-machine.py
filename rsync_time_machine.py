@@ -180,7 +180,10 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
     parser.add_argument(
         "--rsync-get-flags",
         action="store_true",
-        help="Display the default rsync flags that are used for backup. If using remote drive over SSH, --compress will be added.",  # noqa: E501
+        help=(
+            "Display the default rsync flags that are used for backup. "
+            "If using remote drive over SSH, --compress will be added."
+        ),
     )
     parser.add_argument(
         "--rsync-set-flags",
@@ -194,17 +197,28 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
     parser.add_argument(
         "--log-dir",
         default=log_dir_default,
-        help="Set the log file directory. If this flag is set, generated files will not be managed by the script - in particular they will not be automatically deleted. Default: $HOME/.rsync-time-backup",  # noqa: E501
+        help=(
+            "Set the log file directory. If this flag is set, generated files will not be "
+            "managed by the script - in particular they will not be automatically deleted. "
+            "Default: $HOME/.rsync-time-backup"
+        ),
     )
     parser.add_argument(
         "--strategy",
         default="1:1 30:7 365:30",
-        help='Set the expiration strategy. Default: "1:1 30:7 365:30" means after one day, keep one backup per day. After 30 days, keep one backup every 7 days. After 365 days keep one backup every 30 days.',  # noqa: E501
+        help=(
+            'Set the expiration strategy. Default: "1:1 30:7 365:30" means after one day, keep '
+            "one backup per day. After 30 days, keep one backup every 7 days. After 365 days keep "
+            "one backup every 30 days."
+        ),
     )
     parser.add_argument(
         "--no-auto-expire",
         action="store_true",
-        help="Disable automatically deleting backups when out of space. Instead, an error is logged, and the backup is aborted.",  # noqa: E501
+        help=(
+            "Disable automatically deleting backups when out of space. "
+            "Instead, an error is logged, and the backup is aborted."
+        ),
     )
     parser.add_argument(
         "--allow-host-only",
@@ -248,7 +262,7 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
         "--verbose",
         action="store_true",
         help="Enable verbose output. This will slow down the backup process "
-             "(in simple tests by 2x).",
+        "(in simple tests by 2x).",
     )
     args = parser.parse_args()
     # If both positional exclusion_file and optional --exclude-from are provided, raise an error
@@ -415,9 +429,7 @@ def expire_backups(
                 # We calculate days number since the last kept backup
                 last_kept_timestamp_days = last_kept_timestamp // 86400
                 backup_timestamp_days = backup_timestamp // 86400
-                interval_since_last_kept_days = (
-                    backup_timestamp_days - last_kept_timestamp_days
-                )
+                interval_since_last_kept_days = backup_timestamp_days - last_kept_timestamp_days
 
                 # Check if the current backup is in the interval between
                 # the last backup that was kept and Y
@@ -613,9 +625,7 @@ def get_link_dest_option(
         log_info("No previous backup - creating new one.")
     else:
         previous_dest = get_absolute_path(previous_dest, ssh)
-        _full_previous_dest = (
-            f"{ssh.dest_folder_prefix}{previous_dest}" if ssh else previous_dest
-        )
+        _full_previous_dest = f"{ssh.dest_folder_prefix}{previous_dest}" if ssh else previous_dest
         log_info(
             style(
                 "Previous backup found - doing incremental backup"
@@ -657,11 +667,7 @@ def handle_ssh(
         log_error("Source and destination folder cannot be empty.")
         sys.exit(1)
 
-    if (
-        "'" in src_folder
-        or "'" in dest_folder
-        or (exclusion_file and "'" in exclusion_file)
-    ):
+    if "'" in src_folder or "'" in dest_folder or (exclusion_file and "'" in exclusion_file):
         log_error(
             "Source and destination directories may not contain single quote characters.",
         )
@@ -754,8 +760,8 @@ def handle_still_running_or_failed_or_interrupted_backup(
         # - 2nd to last backup becomes last backup.
         ssh_dest_folder_prefix = ssh.dest_folder_prefix if ssh else ""
         log_info(
-                f"{ssh_dest_folder_prefix}{inprogress_file} already exists - the previous backup"
-                "failed or was interrupted. Backup will resume from there.",
+            f"{ssh_dest_folder_prefix}{inprogress_file} already exists - the previous backup"
+            "failed or was interrupted. Backup will resume from there.",
         )
         run_cmd(f"mv -- {previous_dest} {dest}", ssh)
         backups = find_backups(dest_folder, ssh)
@@ -810,8 +816,8 @@ def check_rsync_errors(
         log_data = f.read()
     if "rsync error:" in log_data:
         log_error(
-                "Rsync reported an error. Run this command for more details: "
-                "grep -E 'rsync:|rsync error:' '{log_file}'",
+            "Rsync reported an error. Run this command for more details: "
+            "grep -E 'rsync:|rsync error:' '{log_file}'",
         )
         send_notification(
             title="Backup Error",
