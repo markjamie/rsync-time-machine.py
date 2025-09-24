@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 APPNAME = "rsync-time-machine.py"
 VERBOSE = False
+NOTIFICATIONS = True
 
 
 class SSH(NamedTuple):
@@ -90,21 +91,22 @@ logger = logging.getLogger("rsync-time-machine")
 logger.setLevel(logging.DEBUG)
 
 # Console handler
-console_handler = logging.StreamHandler(sys.stdout)
-console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
-console_handler.setFormatter(console_formatter)
-logger.addHandler(console_handler)
+if not logger.handlers:
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
 
-# File handler (size-based, numbered)
-file_handler = RotatingFileHandler(
-    "rsync-time-machine.log",
-    maxBytes=5 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
-file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
+    # File handler (size-based, numbered)
+    file_handler = RotatingFileHandler(
+        "rsync-time-machine.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
 
 
 def style(text: str, color: str | None = None, *, bold: bool = False) -> str:
@@ -779,7 +781,7 @@ def deal_with_no_space_left(
     auto_expire: bool,
 ) -> bool:
     """Deal with no space left on device."""
-    with open(log_file) as f:
+    with open(log_file, encoding="utf-8", errors="replace") as f:
         log_data = f.read()
 
     no_space_left = re.search(
@@ -812,7 +814,7 @@ def check_rsync_errors(
     auto_delete_log: bool,  # noqa: FBT001
 ) -> None:
     """Check rsync errors."""
-    with open(log_file) as f:
+    with open(log_file, encoding="utf-8", errors="replace") as f:
         log_data = f.read()
     if "rsync error:" in log_data:
         log_error(
@@ -1052,33 +1054,35 @@ def send_notification(
     timeout = 10
     endpoint = "https://ntfy.sh/markjamie-nas2nas-backup"
 
-    for attempt in range(retry_count):
-        try:
-            headers = {"Priority": priority, "Title": title}
-            if tags:
-                headers["Tags"] = tags
-            response = requests.post(
-                endpoint,
-                data=message,
-                headers=headers,
-                timeout=timeout,
-            )
-            if response.status_code == 200:  # noqa: PLR2004
-                return True
+    if NOTIFICATIONS:
+        for attempt in range(retry_count):
+            try:
+                headers = {"Priority": priority, "Title": title}
+                if tags:
+                    headers["Tags"] = tags
+                response = requests.post(
+                    endpoint,
+                    data=message,
+                    headers=headers,
+                    timeout=timeout,
+                )
 
-            # Log non-200 responses but continue retrying
-            log_warn(
-                f"Notification attempt {attempt + 1} got status {response.status_code}",
-            )
+                if response.status_code == 200:  # noqa: PLR2004
+                    return True
 
-        except requests.RequestException as e:
-            log_warn(f"Notification attempt {attempt + 1} failed: {e}")
+                # Log non-200 responses but continue retrying
+                log_warn(
+                    f"Notification attempt {attempt + 1} got status {response.status_code}",
+                )
 
-        # Wait before retry with exponential backoff
-        if attempt < retry_count - 1:
-            time.sleep(2**attempt)
+            except requests.RequestException as e:
+                log_warn(f"Notification attempt {attempt + 1} failed: {e}")
 
-    log_error(f"Failed to send notification after {retry_count} attempts")
+            # Wait before retry with exponential backoff
+            if attempt < retry_count - 1:
+                time.sleep(2**attempt)
+
+        log_error(f"Failed to send notification after {retry_count} attempts")
 
     return False
 

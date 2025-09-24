@@ -7,7 +7,7 @@ import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -32,7 +32,11 @@ from rsync_time_machine import (
     run_cmd,
 )
 
-rsync_time_machine.VERBOSE = True
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+rsync_time_machine.VERBOSE = False
+rsync_time_machine.NOTIFICATIONS = False
 
 
 def test_parse_ssh_pattern() -> None:
@@ -258,10 +262,7 @@ def test_get_link_dest_option(tmp_path: Path) -> None:
     """Test the get_link_dest_option function."""
     previous_dest = tmp_path / "previous"
     previous_dest.mkdir()
-    assert (
-        get_link_dest_option(str(previous_dest), None)
-        == f"--link-dest='{previous_dest}'"
-    )
+    assert get_link_dest_option(str(previous_dest), None) == f"--link-dest='{previous_dest}'"
     assert not get_link_dest_option(None, None)
 
 
@@ -409,8 +410,11 @@ def test_backup(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:  # noqa:
     # Run the backup again but cancel early
     with patch("rsync_time_machine.get_rsync_flags") as mock_get_rsync_flags:
         mock_get_rsync_flags.side_effect = Exception("Break out early")
-        with pytest.raises(Exception, match="Break out early"), patch_now_str(
-            seconds=-40,
+        with (
+            pytest.raises(Exception, match="Break out early"),
+            patch_now_str(
+                seconds=-40,
+            ),
         ):
             backup(**kw)  # type: ignore[arg-type]
 
@@ -435,7 +439,7 @@ def test_backup(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:  # noqa:
     (src_folder / "file2.txt").write_text("Hello, World!")
     (src_folder / "file3.txt").write_text("Hello, World!")
     exclusion_file = tmp_path / "exclusion_file.txt"
-    exclusion_file.write_text("file2.txt")
+    exclusion_file.write_text("file2.txt\n")
     with patch_now_str(seconds=0):
         new_kw = dict(kw, exclusion_file=str(tmp_path / "exclusion_file.txt"))
         backup(**new_kw)  # type: ignore[arg-type]
@@ -510,6 +514,4 @@ def test_backup_with_non_utf8_filename(tmp_path: Path) -> None:
     # Check that the backup was created
     for filename in [composed_filename, decomposed_filename]:
         assert (dest_folder / "latest" / folder / filename).exists()
-        assert (
-            dest_folder / "latest" / folder / filename
-        ).read_text() == "Hello, World!"
+        assert (dest_folder / "latest" / folder / filename).read_text() == "Hello, World!"
