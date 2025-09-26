@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 APPNAME = "rsync-time-machine.py"
 VERBOSE = False
-NOTIFICATIONS = True
 
 
 class SSH(NamedTuple):
@@ -862,6 +861,7 @@ def deal_with_no_space_left(
 def check_rsync_errors(
     log_file: str,
     auto_delete_log: bool,  # noqa: FBT001
+    notification: bool,  # noqa: FBT001
 ) -> None:
     """Check rsync errors."""
     with open(log_file, encoding="utf-8", errors="replace") as f:
@@ -871,31 +871,34 @@ def check_rsync_errors(
             "Rsync reported an error. Run this command for more details: "
             "grep -E 'rsync:|rsync error:' '{log_file}'",
         )
-        send_notification(
-            title="Backup Error",
-            message="Message",
-            tags="x",
-            priority="urgent",
-        )
+        if notification:
+            send_notification(
+                title="Backup Error",
+                message="Message",
+                tags="x",
+                priority="urgent",
+            )
     elif "rsync:" in log_data:
         log_warn(
             "Rsync reported a warning. Run this command for more details: "
             f"grep -E 'rsync:|rsync error:' '{log_file}'",
         )
-        send_notification(
-            title="Backup Warning",
-            message="Message",
-            tags="warning",
-            priority="urgent",
-        )
+        if notification:
+            send_notification(
+                title="Backup Warning",
+                message="Message",
+                tags="warning",
+                priority="urgent",
+            )
     else:
         log_info(style("Backup completed without errors.", "magenta"))
-        send_notification(
-            title="Backup Success",
-            message="Message",
-            tags="white_check_mark",
-            priority="default",
-        )
+        if notification:
+            send_notification(
+                title="Backup Success",
+                message="Message",
+                tags="white_check_mark",
+                priority="default",
+            )
         if auto_delete_log:
             os.remove(log_file)
 
@@ -968,6 +971,7 @@ def backup(
     rsync_get_flags: bool,
     allow_host_only: bool,
     dry_run: bool,
+    notification: bool,
 ) -> None:
     """Perform backup of src_folder to dest_folder."""
     (
@@ -1073,7 +1077,7 @@ def backup(
         if not retry:
             break
 
-    check_rsync_errors(log_file, auto_delete_log)
+    check_rsync_errors(log_file, auto_delete_log, notification)
 
     if dry_run:
         # In dry-run mode, clean up any temporary artifacts
@@ -1104,35 +1108,34 @@ def send_notification(
     timeout = 10
     endpoint = "https://ntfy.sh/markjamie-nas2nas-backup"
 
-    if NOTIFICATIONS:
-        for attempt in range(retry_count):
-            try:
-                headers = {"Priority": priority, "Title": title}
-                if tags:
-                    headers["Tags"] = tags
-                response = requests.post(
-                    endpoint,
-                    data=message,
-                    headers=headers,
-                    timeout=timeout,
-                )
+    for attempt in range(retry_count):
+        try:
+            headers = {"Priority": priority, "Title": title}
+            if tags:
+                headers["Tags"] = tags
+            response = requests.post(
+                endpoint,
+                data=message,
+                headers=headers,
+                timeout=timeout,
+            )
 
-                if response.status_code == 200:  # noqa: PLR2004
-                    return True
+            if response.status_code == 200:  # noqa: PLR2004
+                return True
 
-                # Log non-200 responses but continue retrying
-                log_warn(
-                    f"Notification attempt {attempt + 1} got status {response.status_code}",
-                )
+            # Log non-200 responses but continue retrying
+            log_warn(
+                f"Notification attempt {attempt + 1} got status {response.status_code}",
+            )
 
-            except requests.RequestException as e:
-                log_warn(f"Notification attempt {attempt + 1} failed: {e}")
+        except requests.RequestException as e:
+            log_warn(f"Notification attempt {attempt + 1} failed: {e}")
 
-            # Wait before retry with exponential backoff
-            if attempt < retry_count - 1:
-                time.sleep(2**attempt)
+        # Wait before retry with exponential backoff
+        if attempt < retry_count - 1:
+            time.sleep(2**attempt)
 
-        log_error(f"Failed to send notification after {retry_count} attempts")
+    log_error(f"Failed to send notification after {retry_count} attempts")
 
     return False
 
@@ -1158,6 +1161,7 @@ def main() -> None:
         rsync_get_flags=args.rsync_get_flags,
         allow_host_only=args.allow_host_only,
         dry_run=args.dry_run,
+        notification=args.notification,
     )
 
 
