@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import re
@@ -13,6 +14,7 @@ import sys
 import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import requests
@@ -169,14 +171,55 @@ def terminate_script(
     sys.exit(1)
 
 
-def parse_arguments() -> argparse.Namespace:  # pragma: no cover
+def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments and return the parsed arguments.
 
     (Replaces argument parsing part in the Bash script).
     """
+    # 1. First parse the JSON config file location
+    bootstrap_parser = argparse.ArgumentParser(add_help=False)
+    bootstrap_parser.add_argument("--config", type=str, help="Path to JSON configuration file")
+    args, remaining_argv = bootstrap_parser.parse_known_args()
+
+    # 2. Load JSON config if provided
+    config = {}
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            with config_path.open() as f:
+                config = json.load(f)
+        else:
+            msg = f"Config file not found: {config_path}"
+            raise FileNotFoundError(msg)
+
+    require_src = "src_folder" not in config
+    require_dest = "dest_folder" not in config
+
+    # 3. Build CLI parser
     parser = argparse.ArgumentParser(
+        parents=[bootstrap_parser],
         description="A script for creating and managing time-stamped backups using rsync.",
     )
+
+    # 4. Add CLI arguments - positional
+    parser.add_argument(
+        "src_folder",
+        nargs=None if require_src else "?",
+        help="Source folder for backup. Format: [USER@HOST:]SOURCE",
+    )
+    parser.add_argument(
+        "dest_folder",
+        nargs=None if require_dest else "?",
+        help="Destination folder for backup. Format: [USER@HOST:]DESTINATION",
+    )
+    parser.add_argument(
+        "exclusion_file",
+        nargs="?",
+        help="Path to the file containing exclude patterns."
+        " Cannot be used together with `--exclude-from`.",
+    )
+
+    # 5. Add CLI arguments - optional
     parser.add_argument("-p", "--port", default="22", help="SSH port.")
     parser.add_argument("-i", "--id_rsa", help="Specify the private ssh key to use.")
     parser.add_argument(
@@ -237,21 +280,6 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
         action="store_true",
         help="Simulate the backup process without making any persistent changes.",
     )
-
-    parser.add_argument(
-        "src_folder",
-        help="Source folder for backup. Format: [USER@HOST:]SOURCE",
-    )
-    parser.add_argument(
-        "dest_folder",
-        help="Destination folder for backup. Format: [USER@HOST:]DESTINATION",
-    )
-    parser.add_argument(
-        "exclusion_file",
-        nargs="?",
-        help="Path to the file containing exclude patterns."
-        " Cannot be used together with `--exclude-from`.",
-    )
     parser.add_argument(
         "--exclude-from",
         dest="exclude_from",
@@ -266,7 +294,21 @@ def parse_arguments() -> argparse.Namespace:  # pragma: no cover
         help="Enable verbose output. This will slow down the backup process "
         "(in simple tests by 2x).",
     )
-    args = parser.parse_args()
+
+    final_args = parser.parse_args(remaining_argv)
+
+    # 6. Merge both settings of arguments (CLI beats JSON)
+    merged_dict = config.copy()
+    for key, value in vars(final_args).items():
+        # Keep CLI values if explicitly provided; otherwise keep JSON or None
+        if value is not None or key not in config:
+            merged_dict[key] = value
+    args = argparse.Namespace(**merged_dict)
+    print(args)
+
+    if not args.src_folder or not args.dest_folder:
+        parser.error("Both src_folder and dest_folder must be provided (via config or CLI).")
+
     # If both positional exclusion_file and optional --exclude-from are provided, raise an error
     if args.exclusion_file and args.exclude_from:
         parser.error(
