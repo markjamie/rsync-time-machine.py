@@ -90,11 +90,12 @@ class PlainFormatter(logging.Formatter):
 
 # Logger setup
 logger = logging.getLogger("rsync-time-machine")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
-# Console handler
 if not logger.handlers:
+    # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
     console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
@@ -106,6 +107,7 @@ if not logger.handlers:
         backupCount=5,
         encoding="utf-8",
     )
+    file_handler.setLevel(logging.DEBUG)
     file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -288,6 +290,11 @@ def parse_arguments() -> argparse.Namespace:
         " Not to be used with `exclusion_file`.",
     )
     parser.add_argument(
+        "--notification",
+        action="store_true",
+        help="Enable push notifications.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -300,9 +307,10 @@ def parse_arguments() -> argparse.Namespace:
     # 6. Merge both settings of arguments (CLI beats JSON)
     merged_dict = config.copy()
     for key, value in vars(final_args).items():
-        # Keep CLI values if explicitly provided; otherwise keep JSON or None
-        if value is not None or key not in config:
+        default = parser.get_default(key)
+        if value != default or key not in config:
             merged_dict[key] = value
+
     args = argparse.Namespace(**merged_dict)
     print(args)
 
@@ -935,8 +943,8 @@ def start_backup(
     cmd = f"{cmd} {link_dest_option}"
     cmd = f"{cmd} -- '{src_folder}/' '{dest}/'"
 
-    log_info(style("Running command:", bold=True))
-    log_info(style(cmd, "green"))
+    log_debug(style("Running command:", bold=True))
+    log_debug(style(cmd, "green"))
 
     run_cmd(f"echo {mypid} > {inprogress_file}", ssh)
 
