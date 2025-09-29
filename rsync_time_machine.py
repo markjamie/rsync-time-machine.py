@@ -112,63 +112,12 @@ if not logger.handlers:
     logger.addHandler(file_handler)
 
 
-def style(text: str, color: str | None = None, *, bold: bool = False) -> str:
-    """Return styled text."""
-    colors = {
-        "green": GREEN,
-        "yellow": YELLOW,
-        "red": RED,
-        "magenta": MAGENTA,
-        "cyan": CYAN,
-    }
-    color_code = colors.get(color or "", "")
-    bold_code = BOLD if bold else ""
-    return f"{bold_code}{color_code}{text}{RESET}"
-
-
-def sanitize(s: str) -> str:
-    """Return a sanitized version of the string."""
-    return s.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-
-
-def log_info(message: str) -> None:
-    """Return a logger INFO message."""
-    logger.info(sanitize(message))
-
-
-def log_warn(message: str) -> None:
-    """Return a logger WARNING message."""
-    logger.warning(sanitize(message))
-
-
-def log_error(message: str) -> None:
-    """Return a logger ERROR message."""
-    logger.error(sanitize(message))
-
-
-def log_debug(message: str) -> None:
-    """Return a logger DEBUG message."""
-    logger.debug(sanitize(message))
-
-
-def log_crtical(message: str) -> None:
-    """Return a logger CRITICAL message."""
-    logger.critical(sanitize(message))
-
-
-def log_info_cmd(message: str, ssh: SSH | None = None) -> None:
-    """Return a logger INFO message wiht a command."""
-    if ssh is not None:
-        message = f"{ssh.cmd} '{message}'"
-    log_info(message)
-
-
 def terminate_script(
     _signal_number: int,
     _frame: FrameType | None,
 ) -> None:
     """Terminate the script when CTRL+C is pressed."""
-    log_info("SIGINT caught.")
+    logger.info("SIGINT caught.")
     sys.exit(1)
 
 
@@ -311,7 +260,6 @@ def parse_arguments() -> argparse.Namespace:
             merged_dict[key] = value
 
     args = argparse.Namespace(**merged_dict)
-    print(args)
 
     if not args.src_folder or not args.dest_folder:
         parser.error("Both src_folder and dest_folder must be provided (via config or CLI).")
@@ -417,10 +365,10 @@ def expire_backup(
     # Double-check that we're on a backup destination to be completely
     # sure we're deleting the right folder
     if not find_backup_marker(parent_dir, ssh):
-        log_error(f"{backup_path} is not on a backup destination - aborting.")
+        logger.error("%s is not on a backup destination - aborting.", backup_path)
         sys.exit(1)
 
-    log_info(f"Expiring {backup_path}")
+    logger.info("Expiring %s", backup_path)
     rm_dir(backup_path, ssh)
 
 
@@ -445,7 +393,7 @@ def expire_backups(
 
         # Skip if failed to parse date...
         if backup_timestamp is None:
-            log_warn(f"Could not parse date: {backup_dir}")
+            logger.warning("Could not parse date: %s", backup_dir)
             continue
 
         if backup_dir == backup_to_keep:
@@ -525,10 +473,10 @@ async def async_run_cmd(
 ) -> CmdResult:
     """Run a command locally or remotely."""
     if VERBOSE:
-        log_info(
-            f"Running {'local' if ssh is None else 'remote'}"
-            f" command: {style(cmd, 'green', bold=True)}",
-        )
+        if ssh is None:
+            logger.info("Running 'local' commamnd %s", cmd)
+        else:
+            logger.info("Running 'remote' commamnd %s", cmd)
 
     if ssh is not None:
         process = await asyncio.create_subprocess_shell(
@@ -548,16 +496,16 @@ async def async_run_cmd(
     assert process.stderr is not None, "Process stderr is None"
 
     stdout, stderr = await asyncio.gather(
-        read_stream(process.stdout, log_info, "magenta"),
-        read_stream(process.stderr, log_info, "red"),
+        read_stream(process.stdout, logger.info, "magenta"),
+        read_stream(process.stderr, logger.info, "red"),
     )
 
     await process.wait()
     assert process.returncode is not None, "Process has not returned"
 
     if VERBOSE and process.returncode != 0:
-        msg = style(str(process.returncode), "red", bold=True)
-        log_error(f"Command exit code: {msg}")
+        msg = str(process.returncode)
+        logger.error("Command exit code: %s", msg)
     return CmdResult(stdout, stderr, process.returncode)
 
 
@@ -574,7 +522,7 @@ async def read_stream(
             line_str = line.decode("utf-8", "replace").rstrip()
             output.append(line_str)
             if VERBOSE:
-                callback(f"Command output: {style(line_str, color, bold=True)}")
+                callback(f"Command output: {line_str}")
         else:
             break
     return "\n".join(output)
@@ -641,27 +589,16 @@ def check_dest_is_backup_folder(
     """Check if the destination is a backup folder or drive."""
     marker_path = backup_marker_path(dest_folder)
     if not find_backup_marker(dest_folder, ssh):
-        log_info(
-            style(
-                "Safety check failed - the destination does not appear to be a backup folder "
-                "or drive (marker file not found).",
-                "yellow",
-            ),
+        logger.info(
+            "Safety check failed - the destination does not appear to be a backup folder "
+            "or drive (marker file not found).",
         )
-        log_info(
-            style(
-                "If it is indeed a backup folder, you may add the marker file by running "
-                "the following command:",
-                "yellow",
-            ),
-        )
-        log_info_cmd(
-            style(
-                f'mkdir -p -- "{dest_folder}" ; touch "{marker_path}"',
-                "green",
-                bold=True,
-            ),
-            ssh,
+        logger.info(
+            "If it is indeed a backup folder, you may add the marker file by running "
+            "the following command:"
+            'mkdir -p -- "%s" ; touch "%s"',
+            dest_folder,
+            marker_path,
         )
         sys.exit(1)
 
@@ -673,16 +610,13 @@ def get_link_dest_option(
     """Get the --link-dest option for rsync."""
     link_dest_option = ""
     if not previous_dest:
-        log_info("No previous backup - creating new one.")
+        logger.info("No previous backup - creating new one.")
     else:
         previous_dest = get_absolute_path(previous_dest, ssh)
         _full_previous_dest = f"{ssh.dest_folder_prefix}{previous_dest}" if ssh else previous_dest
-        log_info(
-            style(
-                "Previous backup found - doing incremental backup"
-                f" from {style(_full_previous_dest, bold=True)}",
-                "yellow",
-            ),
+        logger.info(
+            "Previous backup found - doing incremental backup from %s",
+            _full_previous_dest,
         )
         link_dest_option = f"--link-dest='{previous_dest}'"
     return link_dest_option
@@ -715,11 +649,11 @@ def handle_ssh(
     src_folder = src_folder.rstrip("/") if src_folder != "/" else src_folder
 
     if not src_folder or not dest_folder:
-        log_error("Source and destination folder cannot be empty.")
+        logger.error("Source and destination folder cannot be empty.")
         sys.exit(1)
 
     if "'" in src_folder or "'" in dest_folder or (exclusion_file and "'" in exclusion_file):
-        log_error(
+        logger.error(
             "Source and destination directories may not contain single quote characters.",
         )
         sys.exit(1)
@@ -764,8 +698,8 @@ def get_rsync_flags(
         get_file_system_type(src_folder, ssh).lower() == "fat"
         or get_file_system_type(dest_folder, dest_is_ssh(ssh)).lower() == "fat"
     ):
-        log_info("File-system is a version of FAT.")
-        log_info("Using the --modify-window rsync parameter with value 2.")
+        logger.info("File-system is a version of FAT.")
+        logger.info("Using the --modify-window rsync parameter with value 2.")
         rsync_flags.append("--modify-window=2")
 
     if ssh is not None:
@@ -779,15 +713,16 @@ def exit_if_pid_running(running_pid: str, ssh: SSH | None = None) -> None:
         cmd = f"procps -wwfo cmd -p {running_pid} --no-headers | grep '{APPNAME}'"
         running_cmd = run_cmd(cmd, ssh)
         if running_cmd.returncode == 0:
-            log_error(
-                f"Previous backup task is still active - aborting (command: {running_cmd.stdout}).",
+            logger.error(
+                "Previous backup task is still active - aborting (command: %s.",
+                running_cmd.stdout,
             )
             sys.exit(1)
     else:
         ps_flags = "-axp" if sys.platform.startswith("netbsd") else "-p"
         cmd = f"ps {ps_flags} {running_pid} -o 'command' | grep '{APPNAME}'"
         if run_cmd(cmd).stdout:
-            log_error("Previous backup task is still active - aborting.")
+            logger.error("Previous backup task is still active - aborting.")
             sys.exit(1)
 
 
@@ -810,9 +745,11 @@ def handle_still_running_or_failed_or_interrupted_backup(
         # - Last backup is moved to current backup folder so that it can be resumed.
         # - 2nd to last backup becomes last backup.
         ssh_dest_folder_prefix = ssh.dest_folder_prefix if ssh else ""
-        log_info(
-            f"{ssh_dest_folder_prefix}{inprogress_file} already exists - the previous backup"
+        logger.info(
+            "%s%s already exists - the previous backup"
             "failed or was interrupted. Backup will resume from there.",
+            ssh_dest_folder_prefix,
+            inprogress_file,
         )
         run_cmd(f"mv -- {previous_dest} {dest}", ssh)
         backups = find_backups(dest_folder, ssh)
@@ -840,17 +777,17 @@ def deal_with_no_space_left(
 
     if no_space_left:
         if not auto_expire:
-            log_error(
+            logger.error(
                 "No space left on device, and automatic purging of old backups is disabled.",
             )
             sys.exit(1)
 
-        log_warn(
+        logger.warning(
             "No space left on device - removing oldest backup and resuming.",
         )
         backups = find_backups(dest_folder, ssh)
         if len(backups) <= 1:
-            log_error("No space left on device, and no old backup to delete.")
+            logger.error("No space left on device, and no old backup to delete.")
             sys.exit(1)
 
         expire_backup(sorted(backups)[-1], ssh)
@@ -867,7 +804,7 @@ def check_rsync_errors(
     with open(log_file, encoding="utf-8", errors="replace") as f:
         log_data = f.read()
     if "rsync error:" in log_data:
-        log_error(
+        logger.error(
             "Rsync reported an error. Run this command for more details: "
             "grep -E 'rsync:|rsync error:' '{log_file}'",
         )
@@ -879,9 +816,10 @@ def check_rsync_errors(
                 priority="urgent",
             )
     elif "rsync:" in log_data:
-        log_warn(
+        logger.warning(
             "Rsync reported a warning. Run this command for more details: "
-            f"grep -E 'rsync:|rsync error:' '{log_file}'",
+            "grep -E 'rsync:|rsync error:' '%s'",
+            log_file,
         )
         if notification:
             send_notification(
@@ -891,7 +829,7 @@ def check_rsync_errors(
                 priority="urgent",
             )
     else:
-        log_info(style("Backup completed without errors.", "magenta"))
+        logger.info("Backup completed without errors.")
         if notification:
             send_notification(
                 title="Backup Success",
@@ -928,9 +866,9 @@ def start_backup(
     if ssh is not None:
         src_folder = f"{ssh.src_folder_prefix}{src_folder}"
         dest = f"{ssh.dest_folder_prefix}{dest}"
-    log_info(style("Starting backup...", "yellow"))
-    log_info(f"From: {style(src_folder, bold=True)}/")
-    log_info(f"To:   {style(dest, bold=True)}/")
+    logger.info("Starting backup...")
+    logger.info("FROM: %s/", src_folder)
+    logger.info("TO:   %s/", dest)
 
     cmd = "rsync"
     if ssh is not None:
@@ -946,8 +884,8 @@ def start_backup(
     cmd = f"{cmd} {link_dest_option}"
     cmd = f"{cmd} -- '{src_folder}/' '{dest}/'"
 
-    log_info(style("Running command:", bold=True))
-    log_info(style(cmd, "green"))
+    logger.info("Running command:")
+    logger.info(cmd)
 
     run_cmd(f"echo {mypid} > {inprogress_file}", ssh)
 
@@ -988,7 +926,7 @@ def backup(
     )
 
     # if not test_file_exists_src(src_folder, ssh):
-    #     log_error(f"Source folder '{src_folder}' does not exist - aborting.")
+    #     logger.error("Source folder '%s' does not exist - aborting.", src_folder)
     #     sys.exit(1)
 
     check_dest_is_backup_folder(dest_folder, dest_is_ssh(ssh))
@@ -1000,10 +938,8 @@ def backup(
     inprogress_file = os.path.join(dest_folder, "backup.inprogress")
     mypid = os.getpid()
 
-    log_info(50 * "=")
-
     if not os.path.exists(log_dir):
-        log_info(f"Creating log folder in '{log_dir}'...")
+        logger.info("Creating log folder in '%s'...", log_dir)
         os.makedirs(log_dir)
 
     handle_still_running_or_failed_or_interrupted_backup(
@@ -1025,27 +961,27 @@ def backup(
 
     if "-n" in rsync_flags or "--dry-run" in rsync_flags:
         dry_run = True
-        log_info(
-            f"Dry-run detected in rsync flags - setting {style('--dry-run', 'green')}.",
+        logger.info(
+            "Dry-run detected in rsync flags - setting '--dry-run'.",
         )
     elif dry_run:
         rsync_flags.append("--dry-run")
     if dry_run:
-        log_info(
-            f"Dry-run mode enabled: {style('no changes will be persisted', 'orange')}.",
+        logger.info(
+            "Dry-run mode enabled: no changes will be persisted'.",
         )
 
     if rsync_get_flags:
         flags = " ".join(rsync_flags)
-        log_info(f"Rsync flags:\n{style(flags, 'yellow', bold=True)}")
+        logger.info("Rsync flags:\n%s", flags)
         sys.exit(0)
 
     for _ in range(100):  # max 100 retries when no space left
         link_dest_option = get_link_dest_option(previous_dest, ssh)
 
         if not find(dest, ssh, maxdepth=0):
-            _full_dest = style(f"{ssh.cmd if ssh else ''}{dest}", bold=True)
-            log_info(f"Creating destination {_full_dest}")
+            _full_dest = f"{ssh.cmd if ssh else ''}{dest}"
+            logger.info("Creating destination %s", _full_dest)
             mkdir(dest, ssh)
 
         expire_backups(
@@ -1084,7 +1020,7 @@ def backup(
         # and exit without updating the "latest" symlink.
         rm_dir(dest, ssh)
         rm_file(inprogress_file, ssh)
-        log_info("Dry run complete - no backup was saved.")
+        logger.info("Dry run complete - no backup was saved.")
         return
 
     rm_file(os.path.join(dest_folder, "latest"), dest_is_ssh(ssh))
@@ -1124,18 +1060,20 @@ def send_notification(
                 return True
 
             # Log non-200 responses but continue retrying
-            log_warn(
-                f"Notification attempt {attempt + 1} got status {response.status_code}",
+            logger.warning(
+                "Notification attempt %d got status %d",
+                attempt + 1,
+                response.status_code,
             )
 
         except requests.RequestException as e:
-            log_warn(f"Notification attempt {attempt + 1} failed: {e}")
+            logger.warning("Notification attempt %d failed: %s", attempt + 1, e)
 
         # Wait before retry with exponential backoff
         if attempt < retry_count - 1:
             time.sleep(2**attempt)
 
-    log_error(f"Failed to send notification after {retry_count} attempts")
+    logger.error("Failed to send notification after %s attempts", retry_count)
 
     return False
 
