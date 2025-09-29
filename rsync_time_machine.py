@@ -496,8 +496,8 @@ async def async_run_cmd(
     assert process.stderr is not None, "Process stderr is None"
 
     stdout, stderr = await asyncio.gather(
-        read_stream(process.stdout, logger.info, "magenta"),
-        read_stream(process.stderr, logger.info, "red"),
+        read_stream(process.stdout, logger.info),
+        read_stream(process.stderr, logger.info),
     )
 
     await process.wait()
@@ -512,7 +512,6 @@ async def async_run_cmd(
 async def read_stream(
     stream: asyncio.StreamReader,
     callback: Callable[[str], None],
-    color: str,
 ) -> str:
     """Read each line from the stream and pass it to the callback."""
     output = []
@@ -858,38 +857,38 @@ def start_backup(
     ssh: SSH | None,
     now: str,
 ) -> str:
-    """Start backup."""
-    log_file = os.path.join(
-        log_dir,
-        f"{now}.log",
-    )
+    """Start backup with standard Python logging."""
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{now}.log")
+
     if ssh is not None:
         src_folder = f"{ssh.src_folder_prefix}{src_folder}"
         dest = f"{ssh.dest_folder_prefix}{dest}"
+
     logger.info("Starting backup...")
-    logger.info("FROM: %s/", src_folder)
-    logger.info("TO:   %s/", dest)
+    logger.info("From: %s", src_folder)
+    logger.info("To:   %s", dest)
 
     cmd = "rsync"
     if ssh is not None:
         id_rsa_option = f"-i {ssh.id_rsa} " if ssh.id_rsa else ""
-        cmd = f"{cmd} -e 'ssh -p {ssh.port} {id_rsa_option}-o "
-        "StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'"
+        cmd = (
+            f"{cmd} -e 'ssh -p {ssh.port} {id_rsa_option}-o "
+            "StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'"
+        )
 
     cmd = f"{cmd} {' '.join(rsync_flags)}"
     cmd = f"{cmd} --log-file '{log_file}'"
     if exclusion_file:
         cmd = f"{cmd} --exclude-from '{exclusion_file}'"
-
-    cmd = f"{cmd} {link_dest_option}"
-    cmd = f"{cmd} -- '{src_folder}/' '{dest}/'"
+    cmd = f"{cmd} {link_dest_option} -- '{src_folder}/' '{dest}/'"
 
     logger.info("Running command:")
     logger.info(cmd)
 
     run_cmd(f"echo {mypid} > {inprogress_file}", ssh)
-
     run_cmd(cmd)
+
     return log_file
 
 
@@ -911,12 +910,11 @@ def backup(
     dry_run: bool,
     notification: bool,
 ) -> None:
-    """Perform backup of src_folder to dest_folder."""
-    (
-        src_folder,
-        dest_folder,
-        ssh,
-    ) = handle_ssh(
+    """Perform backup of src_folder to dest_folder with local logging."""
+    logger = logging.getLogger(__name__)
+
+    # Handle SSH if needed
+    src_folder, dest_folder, ssh = handle_ssh(
         src_folder,
         dest_folder,
         ssh_port=port,
@@ -924,10 +922,6 @@ def backup(
         exclusion_file=exclusion_file,
         allow_host_only=allow_host_only,
     )
-
-    # if not test_file_exists_src(src_folder, ssh):
-    #     logger.error("Source folder '%s' does not exist - aborting.", src_folder)
-    #     sys.exit(1)
 
     check_dest_is_backup_folder(dest_folder, dest_is_ssh(ssh))
 
@@ -961,22 +955,19 @@ def backup(
 
     if "-n" in rsync_flags or "--dry-run" in rsync_flags:
         dry_run = True
-        logger.info(
-            "Dry-run detected in rsync flags - setting '--dry-run'.",
-        )
+        logger.info("Dry-run detected in rsync flags - setting '--dry-run'.")
     elif dry_run:
         rsync_flags.append("--dry-run")
     if dry_run:
-        logger.info(
-            "Dry-run mode enabled: no changes will be persisted'.",
-        )
+        logger.info("Dry-run mode enabled: no changes will be persisted.")
 
     if rsync_get_flags:
         flags = " ".join(rsync_flags)
         logger.info("Rsync flags:\n%s", flags)
         sys.exit(0)
 
-    for _ in range(100):  # max 100 retries when no space left
+    # --- MAIN RETRY LOOP ---
+    for _ in range(100):
         link_dest_option = get_link_dest_option(previous_dest, ssh)
 
         if not find(dest, ssh, maxdepth=0):
@@ -991,6 +982,7 @@ def backup(
             ssh,
         )
 
+        # Start backup with local log file
         log_file = start_backup(
             src_folder,
             dest,
@@ -1004,6 +996,7 @@ def backup(
             now,
         )
 
+        # Retry logic if disk is full
         retry = deal_with_no_space_left(
             log_file,
             dest_folder,
@@ -1013,16 +1006,17 @@ def backup(
         if not retry:
             break
 
+    # Check for rsync errors
     check_rsync_errors(log_file, auto_delete_log, notification)
 
     if dry_run:
-        # In dry-run mode, clean up any temporary artifacts
-        # and exit without updating the "latest" symlink.
+        # Cleanup temporary artifacts in dry-run mode
         rm_dir(dest, ssh)
         rm_file(inprogress_file, ssh)
         logger.info("Dry run complete - no backup was saved.")
         return
 
+    # Update "latest" symlink
     rm_file(os.path.join(dest_folder, "latest"), dest_is_ssh(ssh))
     ln(
         os.path.basename(dest),
