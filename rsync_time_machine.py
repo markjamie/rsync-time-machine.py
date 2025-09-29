@@ -946,8 +946,8 @@ def start_backup(
     cmd = f"{cmd} {link_dest_option}"
     cmd = f"{cmd} -- '{src_folder}/' '{dest}/'"
 
-    log_debug(style("Running command:", bold=True))
-    log_debug(style(cmd, "green"))
+    log_info(style("Running command:", bold=True))
+    log_info(style(cmd, "green"))
 
     run_cmd(f"echo {mypid} > {inprogress_file}", ssh)
 
@@ -987,9 +987,9 @@ def backup(
         allow_host_only=allow_host_only,
     )
 
-    if not test_file_exists_src(src_folder, ssh):
-        log_error(f"Source folder '{src_folder}' does not exist - aborting.")
-        sys.exit(1)
+    # if not test_file_exists_src(src_folder, ssh):
+    #     log_error(f"Source folder '{src_folder}' does not exist - aborting.")
+    #     sys.exit(1)
 
     check_dest_is_backup_folder(dest_folder, dest_is_ssh(ssh))
 

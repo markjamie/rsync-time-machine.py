@@ -1,0 +1,7 @@
+{
+    "src_folder": "/tmp/rsync/_data/",
+    "port": "6789",
+    "dest_folder": "ssh_user@markjamie.synology.me:/var/services/homes/ssh_user",
+    "notification": true,
+    "dry_run": false
+}
