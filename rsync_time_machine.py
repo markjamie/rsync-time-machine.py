@@ -64,7 +64,7 @@ class ColourFormatter(logging.Formatter):
 
     LEVEL_COLOURS: ClassVar[dict[int, str]] = {
         logging.DEBUG: CYAN,
-        logging.INFO: WHITE,
+        logging.INFO: GREEN,
         logging.WARNING: YELLOW,
         logging.ERROR: RED,
         logging.CRITICAL: MAGENTA,
@@ -95,7 +95,7 @@ logger.setLevel(logging.DEBUG)
 if not logger.handlers:
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.DEBUG)
     console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
@@ -351,9 +351,6 @@ def find_backups(dest_folder: str, ssh: SSH | None = None) -> list[str]:
     """Return a list of all available backups in the destination folder, sorted by date."""
     cmd = f"find '{dest_folder}/' -maxdepth 1 -type d -name '????-??-??-??????' -prune | sort -r"
     result = run_cmd(cmd, ssh)
-    logger.debug("find_backups command: %s", cmd)
-    logger.debug("find_backups stdout: %s", result.stdout.strip())
-    logger.debug("find_backups stderr: %s", result.stderr.strip())
     return result.stdout.splitlines()
 
 
@@ -377,76 +374,67 @@ def expire_backup(
 def expire_backups(
     dest_folder: str,
     expiration_strategy: str,
-    backup_to_keep: str,
+    newest: str,
     ssh: SSH | None,
 ) -> None:
     """Expire backups according to the expiration strategy."""
     current_timestamp = int(datetime.now().timestamp())
-    last_kept_timestamp = 9999999999
-    backups = find_backups(dest_folder, ssh)
+    backups = sorted(find_backups(dest_folder, ssh))  # oldest → newest
 
-    # We will also keep the oldest backup
-    oldest_backup_to_keep = sorted(backups)[0] if backups else None
+    if not backups:
+        logger.debug("No backups found in %s", dest_folder)
+        return
 
-    # Process each backup dir from the oldest to the most recent
-    for backup_dir in sorted(backups):
-        backup_date = os.path.basename(backup_dir)
-        backup_timestamp = parse_date_to_epoch(backup_date)
+    oldest_backup = backups[0]
+    last_kept_timestamp = parse_date_to_epoch(os.path.basename(oldest_backup)) or 0
 
-        # Skip if failed to parse date...
+    for backup_dir in backups:
+        backup_name = os.path.basename(backup_dir)
+        backup_timestamp = parse_date_to_epoch(backup_name)
         if backup_timestamp is None:
             logger.warning("Could not parse date: %s", backup_dir)
             continue
 
-        if backup_dir == backup_to_keep:
-            # This is the latest backup requested to be kept. We can finish pruning
-            break
-
-        if backup_dir == oldest_backup_to_keep:
-            # We don't want to delete the oldest backup. It becomes the first "last kept" backup
+        # Always keep oldest backup
+        if backup_dir == oldest_backup:
+            logger.debug("Keeping backup: %s (oldest)", backup_dir)
             last_kept_timestamp = backup_timestamp
-            # As we keep it, we can skip processing it and go to the next oldest one in the loop
             continue
 
-        # Find which strategy token applies to this particular backup
-        for strategy_token in sorted(expiration_strategy.split(), reverse=True):
-            t = list(map(int, strategy_token.split(":")))
+        # Always keep newest backup
+        if backup_dir == newest:
+            logger.debug("Keeping backup: %s (newest)", backup_dir)
+            last_kept_timestamp = backup_timestamp
+            continue
 
-            # After which date (relative to today) this token applies (X)
-            # We use seconds to get exact cut off time
-            cut_off_timestamp = current_timestamp - t[0] * 86400
+        # Apply expiration strategy
+        deleted = False
+        for token in sorted(expiration_strategy.split(), reverse=True):
+            days_ago, interval = map(int, token.split(":"))
+            cut_off_ts = current_timestamp - days_ago * 86400
 
-            # Every how many days should a backup be kept past the cut off date (Y)
-            # We use days (not seconds)
-            cut_off_interval_days = t[1]
-
-            # If we've found the strategy token that applies to this backup
-            if backup_timestamp <= cut_off_timestamp:
-                # Special case: if Y is "0" we delete every time
-                if cut_off_interval_days == 0:
+            if backup_timestamp <= cut_off_ts:
+                if interval == 0:
                     expire_backup(backup_dir, ssh)
+                    logger.debug("Deleted backup (interval=0): %s", backup_dir)
+                    deleted = True
                     break
 
-                # We calculate days number since the last kept backup
-                last_kept_timestamp_days = last_kept_timestamp // 86400
-                backup_timestamp_days = backup_timestamp // 86400
-                interval_since_last_kept_days = backup_timestamp_days - last_kept_timestamp_days
-
-                # Check if the current backup is in the interval between
-                # the last backup that was kept and Y
-                # to determine what to keep/delete we use days difference
-                if interval_since_last_kept_days < cut_off_interval_days:
-                    # Yes: Delete that one
+                interval_days = (backup_timestamp // 86400) - (last_kept_timestamp // 86400)
+                if interval_days < interval:
                     expire_backup(backup_dir, ssh)
-                    # Backup deleted, no point to check shorter timespan strategies
-                    # go to next backup
+                    logger.debug(
+                        "Deleted backup (interval %d days, since last kept %d days): %s",
+                        interval,
+                        interval_days,
+                        backup_dir,
+                    )
+                    deleted = True
                     break
 
-                # No: Keep it.
-                # This is now the last kept backup
-                last_kept_timestamp = backup_timestamp
-                # And go to the next backup
-                break
+        if not deleted:
+            logger.debug("Keeping backup: %s", backup_dir)
+            last_kept_timestamp = backup_timestamp
 
 
 def backup_marker_path(folder: str) -> str:
@@ -545,11 +533,6 @@ def find(path: str, ssh: SSH | None = None, maxdepth: int | None = None) -> str:
     return run_cmd(cmd, ssh).stdout
 
 
-def get_absolute_path(path: str, ssh: SSH | None = None) -> str:
-    """Get the absolute path of the given path."""
-    return run_cmd(f"cd '{path}';pwd", ssh).stdout
-
-
 def mkdir(path: str, ssh: SSH | None = None) -> None:
     """Create a directory."""
     run_cmd(f"mkdir -p -- '{path}'", ssh)
@@ -570,11 +553,6 @@ def ln(src: str, dest: str, ssh: SSH | None = None) -> None:
     run_cmd(f"ln -s -- '{src}' '{dest}'", ssh)
 
 
-def test_file_exists_src(path: str, ssh: SSH | None = None) -> bool:  # noqa: PT028
-    """Test if a file exists."""
-    return run_cmd(f"test -e '{path}'", ssh).returncode == 0
-
-
 def get_file_system_type(path: str, ssh: SSH | None = None) -> str:
     """Get the filesystem type of the given path."""
     lines = run_cmd(f"df -T '{path}'", ssh).stdout.split("\n")
@@ -590,14 +568,14 @@ def check_dest_is_backup_folder(
     """Check if the destination is a backup folder or drive."""
     marker_path = backup_marker_path(dest_folder)
     if not find_backup_marker(dest_folder, ssh):
-        logger.info(
+        logger.error(
             "Safety check failed - the destination does not appear to be a backup folder "
-            "or drive (marker file not found).",
+            "or drive (backup.marker file not found).",
         )
-        logger.info(
+        logger.error(
             "If it is indeed a backup folder, you may add the marker file by running "
             "the following command:"
-            'mkdir -p -- "%s" ; touch "%s"',
+            ' mkdir -p -- "%s" ; touch "%s"',
             dest_folder,
             marker_path,
         )
@@ -880,8 +858,8 @@ def start_backup(
         cmd = f"{cmd} --exclude-from '{exclusion_file}'"
     cmd = f"{cmd} {link_dest_option} -- '{src_folder}/' '{dest}/'"
 
-    logger.info("Running command:")
-    logger.info(cmd)
+    logger.debug("Running command:")
+    logger.debug(cmd)
 
     run_cmd(f"echo {mypid} > {inprogress_file}", ssh)
     run_cmd(cmd)
@@ -967,17 +945,19 @@ def backup(
     for _ in range(100):
         link_dest_option = get_link_dest_option(previous_dest, ssh)
 
-        if not find(dest, ssh, maxdepth=0):
-            _full_dest = f"{ssh.cmd if ssh else ''}{dest}"
-            logger.info("Creating destination %s", _full_dest)
-            mkdir(dest, ssh)
-
+        # Apply backup expiration logic
         expire_backups(
             dest_folder,
             expiration_strategy,
             previous_dest if previous_dest else dest,
             ssh,
         )
+
+        # Create folder for this backup
+        if not find(dest, ssh, maxdepth=0):
+            _full_dest = f"{ssh.cmd if ssh else ''}{dest}"
+            logger.info("Creating destination %s", _full_dest)
+            mkdir(dest, ssh)
 
         # Start backup with local log file
         log_file = start_backup(

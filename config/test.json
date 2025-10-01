@@ -1,6 +1,6 @@
 {
-    "src_folder": "/tmp/rsync/_data/",
-    "dest_folder": "/tmp/rsync/time-machine",
+    "src_folder": "/User/markjackson/rsync_test_data/",
+    "dest_folder": "/tmp/rsync_test_data",
     "notification": false,
     "dry_run": false
 }
