@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import sys
 import time
@@ -89,7 +90,7 @@ class PlainFormatter(logging.Formatter):
 
 # Logger setup
 logger = logging.getLogger("rsync-time-machine")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 if not logger.handlers:
     # Console handler
@@ -106,7 +107,7 @@ if not logger.handlers:
         backupCount=5,
         encoding="utf-8",
     )
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.INFO)
     file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -347,12 +348,13 @@ def parse_date_to_epoch(date_str: str) -> int:
 
 
 def find_backups(dest_folder: str, ssh: SSH | None = None) -> list[str]:
-    """Return a list of all available backups in the destination folder, sorted by date.
-
-    (Replaces 'fn_find_backups' in the Bash script).
-    """
+    """Return a list of all available backups in the destination folder, sorted by date."""
     cmd = f"find '{dest_folder}/' -maxdepth 1 -type d -name '????-??-??-??????' -prune | sort -r"
-    return run_cmd(cmd, dest_is_ssh(ssh)).stdout.splitlines()
+    result = run_cmd(cmd, ssh)
+    logger.debug("find_backups command: %s", cmd)
+    logger.debug("find_backups stdout: %s", result.stdout.strip())
+    logger.debug("find_backups stderr: %s", result.stderr.strip())
+    return result.stdout.splitlines()
 
 
 def expire_backup(
@@ -480,7 +482,7 @@ async def async_run_cmd(
 
     if ssh is not None:
         process = await asyncio.create_subprocess_shell(
-            f"{ssh.cmd} '{cmd}'",
+            f"{ssh.cmd} {shlex.quote(cmd)}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -602,23 +604,16 @@ def check_dest_is_backup_folder(
         sys.exit(1)
 
 
-def get_link_dest_option(
-    previous_dest: str | None,
-    ssh: SSH | None,
-) -> str:
-    """Get the --link-dest option for rsync."""
-    link_dest_option = ""
+def get_link_dest_option(previous_dest: str | None, ssh: SSH | None = None) -> str:
+    """Return the correct --link-dest option for rsync.
+
+    - If no previous backup exists, returns an empty string.
+    - Uses the full path returned by find_backups() for both local and remote.
+    """
     if not previous_dest:
-        logger.info("No previous backup - creating new one.")
-    else:
-        previous_dest = get_absolute_path(previous_dest, ssh)
-        _full_previous_dest = f"{ssh.dest_folder_prefix}{previous_dest}" if ssh else previous_dest
-        logger.info(
-            "Previous backup found - doing incremental backup from %s",
-            _full_previous_dest,
-        )
-        link_dest_option = f"--link-dest='{previous_dest}'"
-    return link_dest_option
+        return ""
+    # previous_dest is already the full path (local or remote)
+    return f"--link-dest='{previous_dest}'"
 
 
 def handle_ssh(
@@ -878,6 +873,8 @@ def start_backup(
         )
 
     cmd = f"{cmd} {' '.join(rsync_flags)}"
+    if link_dest_option:
+        cmd = f"{cmd} {link_dest_option}"
     cmd = f"{cmd} --log-file '{log_file}'"
     if exclusion_file:
         cmd = f"{cmd} --exclude-from '{exclusion_file}'"
