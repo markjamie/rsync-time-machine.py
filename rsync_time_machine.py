@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
 
-APPNAME = "rsync-time-machine.py"
+APPNAME = "rsync_time_machine.py"
 VERBOSE = False
 
 
