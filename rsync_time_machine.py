@@ -95,7 +95,7 @@ logger.setLevel(logging.DEBUG)
 if not logger.handlers:
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(logging.INFO)
     console_formatter = ColourFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
@@ -107,7 +107,7 @@ if not logger.handlers:
         backupCount=5,
         encoding="utf-8",
     )
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(logging.DEBUG)
     file_formatter = PlainFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -801,7 +801,7 @@ def check_rsync_errors(
                 priority="urgent",
             )
     else:
-        logger.info("Backup completed without errors.")
+        logger.info("Backup completed without errors!")
         if notification:
             send_notification(
                 title="Backup Success",
